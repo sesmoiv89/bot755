@@ -738,6 +738,13 @@ client.once('ready', async () => {
       .setDescription('Débannir un utilisateur')
       .setDefaultMemberPermissions(PermissionsBitField.Flags.BanMembers)
       .toJSON(),
+    new SlashCommandBuilder()
+      .setName('guessmyrankvideo')
+      .setDescription('Publier une vidéo dans Guess My Rank')
+      .addStringOption(opt => opt.setName('rang').setDescription('Le vrai rang (ex: Platine II)').setRequired(true))
+      .addAttachmentOption(opt => opt.setName('video').setDescription('Vidéo ou image à publier').setRequired(false))
+      .addStringOption(opt => opt.setName('url').setDescription('URL de la vidéo (si pas de fichier)').setRequired(false))
+      .toJSON(),
   ];
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -817,7 +824,42 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // /ban
+  // /guessmyrankvideo
+  if (interaction.isChatInputCommand() && interaction.commandName === 'guessmyrankvideo') {
+    const rankInput  = interaction.options.getString('rang');
+    const attachment = interaction.options.getAttachment('video');
+    const urlInput   = interaction.options.getString('url');
+
+    const rank = GMR_RANKS.find(r => r.label.toLowerCase() === rankInput.toLowerCase());
+    if (!rank) return interaction.reply({ content: `❌ Rang invalide. Exemples : \`Bronze I\`, \`Platine II\`, \`Champion III\``, ephemeral: true });
+
+    const mediaUrl = attachment?.url || urlInput;
+    if (!mediaUrl) return interaction.reply({ content: '❌ Fournis une vidéo (fichier joint) ou une URL.', ephemeral: true });
+
+    const data = loadGmrData();
+    data.videos.push({
+      url:     mediaUrl,
+      rank:    rank.label,
+      emoji:   rank.emoji,
+      addedBy: interaction.user.id,
+      addedAt: Date.now(),
+    });
+    saveGmrData(data);
+
+    // Poste dans le salon GMR
+    const gmrChannel = interaction.guild.channels.cache.get(GMR_CHANNEL_ID);
+    if (gmrChannel) {
+      const embed = new EmbedBuilder()
+        .setTitle('📤 Nouvelle vidéo ajoutée !')
+        .setDescription(`**${interaction.user.username}** a ajouté une vidéo.\nRang masqué — joue pour deviner !\n\n${mediaUrl}`)
+        .setColor(0x5865f2)
+        .setFooter({ text: `Total : ${data.videos.length} vidéo(s)` });
+      await gmrChannel.send({ embeds: [embed] });
+    }
+
+    await interaction.reply({ content: `✅ Vidéo publiée avec le rang **${rank.emoji} ${rank.label}** !`, ephemeral: true });
+    return;
+  }
   if (interaction.isChatInputCommand() && interaction.commandName === 'ban') {
     const allowedRoles = ['1522018910948425889', '1522019388264546314']; // Owner, Fondateur
     const hasRole = allowedRoles.some(r => interaction.member.roles.cache.has(r));
