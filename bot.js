@@ -1046,26 +1046,10 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.customId === 'gmr_publish') {
-    const modal = new ModalBuilder().setCustomId('gmr_publish_modal').setTitle('Publier une vidéo GMR');
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('gmr_video_url')
-          .setLabel('URL de la vidéo')
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('https://youtube.com/... ou lien Discord')
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('gmr_rank')
-          .setLabel('Vrai rang (ex: Platine II, Champion I)')
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('Bronze I, Or III, Diamond II...')
-          .setRequired(true)
-      ),
-    );
-    await interaction.showModal(modal);
+    await interaction.reply({
+      content: '📤 Pour publier une vidéo, utilise la commande :\n`/guessmyrankvideo rang:p2 video:[ta vidéo]`\n\nTu peux joindre directement ta vidéo comme fichier ou mettre une URL.',
+      ephemeral: true,
+    });
     return;
   }
 
