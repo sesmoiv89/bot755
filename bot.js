@@ -850,12 +850,43 @@ client.on('interactionCreate', async (interaction) => {
     const rank = findGmrRank(rankInput);
     if (!rank) return interaction.reply({ content: `❌ Rang invalide. Ex: \`b1\`, \`p2\`, \`gc3\`, \`ssl\`, \`Platine II\`...`, ephemeral: true });
 
-    const mediaUrl = attachment?.url || urlInput;
-    if (!mediaUrl) return interaction.reply({ content: '❌ Fournis une vidéo (fichier joint) ou une URL.', ephemeral: true });
+    if (!attachment && !urlInput) return interaction.reply({ content: '❌ Fournis une vidéo (fichier joint) ou une URL.', ephemeral: true });
 
+    await interaction.reply({ content: '⏳ Publication en cours...', ephemeral: true });
+
+    const gmrChannel = interaction.guild.channels.cache.get(GMR_CHANNEL_ID);
+    if (!gmrChannel) return interaction.editReply({ content: '❌ Salon GMR introuvable.' });
+
+    let postedMsg;
+    if (attachment) {
+      // Re-upload le fichier dans le salon GMR pour qu'il s'affiche en lecteur intégré
+      const { AttachmentBuilder } = require('discord.js');
+      const https = require('https');
+      const fileBuffer = await new Promise((resolve, reject) => {
+        const chunks = [];
+        https.get(attachment.url, res => {
+          res.on('data', c => chunks.push(c));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+          res.on('error', reject);
+        });
+      });
+      const att = new AttachmentBuilder(fileBuffer, { name: attachment.name || 'video.mp4' });
+      postedMsg = await gmrChannel.send({
+        content: `📤 **${interaction.user.username}** a ajouté une vidéo — Guess the rank !`,
+        files: [att],
+      });
+    } else {
+      // URL externe — envoie juste le lien, Discord l'affiche en preview
+      postedMsg = await gmrChannel.send({
+        content: `📤 **${interaction.user.username}** a ajouté une vidéo — Guess the rank !\n${urlInput}`,
+      });
+    }
+
+    // Stocke l'URL permanente du fichier re-uploadé
+    const storedUrl = postedMsg.attachments.first()?.url || urlInput;
     const data = loadGmrData();
     data.videos.push({
-      url:     mediaUrl,
+      url:     storedUrl,
       rank:    rank.label,
       emoji:   rank.emoji,
       addedBy: interaction.user.id,
@@ -863,18 +894,7 @@ client.on('interactionCreate', async (interaction) => {
     });
     saveGmrData(data);
 
-    // Poste dans le salon GMR
-    const gmrChannel = interaction.guild.channels.cache.get(GMR_CHANNEL_ID);
-    if (gmrChannel) {
-      const embed = new EmbedBuilder()
-        .setTitle('📤 Nouvelle vidéo ajoutée !')
-        .setDescription(`**${interaction.user.username}** a ajouté une vidéo.\nRang masqué — joue pour deviner !\n\n${mediaUrl}`)
-        .setColor(0x5865f2)
-        .setFooter({ text: `Total : ${data.videos.length} vidéo(s)` });
-      await gmrChannel.send({ embeds: [embed] });
-    }
-
-    await interaction.reply({ content: `✅ Vidéo publiée avec le rang **${rank.emoji} ${rank.label}** !`, ephemeral: true });
+    await interaction.editReply({ content: `✅ Vidéo publiée ! Rang masqué : **${rank.emoji} ${rank.label}** (visible seulement par toi)\nTotal : ${data.videos.length} vidéo(s)` });
     return;
   }
   if (interaction.isChatInputCommand() && interaction.commandName === 'ban') {
