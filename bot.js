@@ -1,0 +1,926 @@
+// Charge le token depuis les variables d'environnement (Railway) ou .env (local)
+if (!process.env.DISCORD_TOKEN) {
+  try { require('dotenv').config(); } catch {}
+}
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  PermissionsBitField,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  StringSelectMenuBuilder,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+} = require('discord.js');
+const cron = require('node-cron');
+
+const SHOP_CHANNEL_ID    = '1522054947661676725';
+const TRACKER_CHANNEL_ID = '1522062347651387553';
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
+
+// ── Constantes ────────────────────────────────────────────────────────────
+const WELCOME_CHANNEL_ID = '1522025378175258756';
+const RANK_CHANNEL_ID    = '1522031444577222727';
+const WELCOME_IMAGE      = 'https://www.operationsports.com/wp-content/uploads/2025/03/RL.jpg?fit=1200%2C675';
+const AUTO_ROLE_ID       = '1522020794316755096'; // WALLTER korp
+const LIVE_ALLOWED_USER  = '470642609224810496';
+const TIKTOK_URL         = 'https://www.tiktok.com/@wallter_rl/live';
+
+const LINK_ALLOWED_ROLES = [
+  '1522018910948425889', // Owner
+  '1522022335714955406', // Staff
+  '1522019388264546314', // Fondateur
+];
+
+// ── Rangs Rocket League ───────────────────────────────────────────────────
+const RANKS = [
+  { id: 'rank_bronze',   name: 'Bronze',           emoji: { name: 'Bronze3',          id: '643180459517542413' }, color: 0xcd7f32 },
+  { id: 'rank_argent',   name: 'Argent',            emoji: { name: 'Argent3',          id: '643180434007785493' }, color: 0xc0c0c0 },
+  { id: 'rank_or',       name: 'Or',                emoji: { name: 'Or3',              id: '643180390986547200' }, color: 0xffd700 },
+  { id: 'rank_platine',  name: 'Platine',           emoji: { name: 'Platine3',         id: '1472040058709344504' }, color: 0x00bfff },
+  { id: 'rank_diamant',  name: 'Diamant',           emoji: { name: 'Diamant3',         id: '1472041508072067216' }, color: 0x00cfff },
+  { id: 'rank_champion', name: 'Champion',          emoji: { name: 'Champion3',        id: '1472043031715643517' }, color: 0x9b59b6 },
+  { id: 'rank_gc',       name: 'Grand Champion',    emoji: { name: 'grandchampion1',   id: '1465401214199140434' }, color: 0xe74c3c },
+  { id: 'rank_ssl',      name: 'Supersonic Legend', emoji: { name: 'SupersonicLegend', id: '758821358993408020' }, color: 0xf1c40f },
+];
+
+// ── Plateformes ───────────────────────────────────────────────────────────
+const PLATFORMS = [
+  { id: 'plat_pc',          name: 'PC',          emoji: { name: 'pc',          id: '1220902480037023824' }, color: 0x7289da },
+  { id: 'plat_playstation', name: 'PlayStation', emoji: { name: 'Playstation', id: '1511422986157297856' }, color: 0x003791 },
+  { id: 'plat_xbox',        name: 'Xbox',        emoji: { name: 'Xbox',        id: '1371251509358100480' }, color: 0x107c10 },
+  { id: 'plat_switch',      name: 'Switch',      emoji: { name: 'Switch',      id: '643395807869009930'  }, color: 0xe4000f },
+];
+
+const rankRoleIds     = {};
+const platformRoleIds = {};
+const pendingRank     = new Map();
+
+// ── Anti-spam / Anti-lien ─────────────────────────────────────────────────
+const LINK_REGEX           = /https?:\/\/|discord\.gg\/|www\./i;
+const spamMap              = new Map();
+const TIMEOUT_SPAM_LIGHT   = 60 * 1000;
+const TIMEOUT_SPAM_HEAVY   = 60 * 60 * 1000;
+const TIMEOUT_LINK         = 5 * 60 * 1000;
+const SPAM_WINDOW          = 1000;
+const SPAM_THRESHOLD_LIGHT = 3;
+const SPAM_THRESHOLD_HEAVY = 7;
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+async function purgeRecentMessages(channel, userId) {
+  try {
+    const fetched = await channel.messages.fetch({ limit: 100 });
+    const now = Date.now();
+    const toDelete = fetched.filter(
+      (m) => m.author.id === userId && now - m.createdTimestamp < 60 * 1000
+    );
+    if (toDelete.size === 0) return;
+    if (toDelete.size === 1) await toDelete.first().delete().catch(() => {});
+    else await channel.bulkDelete(toDelete, true).catch(() => {});
+  } catch (err) {
+    console.error('❌ Erreur purge messages :', err.message);
+  }
+}
+
+async function timeoutMember(member, durationMs) {
+  try {
+    if (!member.guild.members.me.permissions.has(PermissionsBitField.Flags.ModerateMembers)) return;
+    if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+    await member.timeout(durationMs);
+  } catch (err) {
+    console.error(`❌ Impossible de timeout ${member.user.tag} :`, err.message);
+  }
+}
+
+async function ensureRole(guild, name, color) {
+  let role = guild.roles.cache.find((r) => r.name === name);
+  if (!role) {
+    const templateRole = guild.roles.cache.get(AUTO_ROLE_ID);
+    role = await guild.roles.create({
+      name,
+      color,
+      permissions: templateRole ? templateRole.permissions : [],
+      reason: 'Création automatique rôle RL',
+    });
+    console.log(`✅ Rôle créé : ${name}`);
+  }
+  return role;
+}
+
+function buildRankButtons() {
+  const rows = [];
+  for (let i = 0; i < RANKS.length; i += 4) {
+    const row = new ActionRowBuilder();
+    RANKS.slice(i, i + 4).forEach((rank) => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(rank.id)
+          .setLabel(rank.name)
+          .setEmoji({ name: rank.emoji.name, id: rank.emoji.id })
+          .setStyle(ButtonStyle.Secondary)
+      );
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function buildPlatformButtons() {
+  const row = new ActionRowBuilder();
+  PLATFORMS.forEach((plat) => {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId(plat.id)
+        .setLabel(plat.name)
+        .setEmoji({ name: plat.emoji.name, id: plat.emoji.id })
+        .setStyle(ButtonStyle.Secondary)
+    );
+  });
+  return [row];
+}
+
+async function setupRankMessage(guild) {
+  const channel = guild.channels.cache.get(RANK_CHANNEL_ID);
+  if (!channel) { console.error('❌ Salon de rang introuvable.'); return; }
+
+  for (const rank of RANKS) {
+    const role = await ensureRole(guild, rank.name, rank.color);
+    rankRoleIds[rank.id] = role.id;
+  }
+  for (const plat of PLATFORMS) {
+    const role = await ensureRole(guild, plat.name, plat.color);
+    platformRoleIds[plat.id] = role.id;
+  }
+
+  const messages = await channel.messages.fetch({ limit: 20 });
+  const existing = messages.find((m) => m.author.id === client.user.id && m.components.length > 0);
+  if (existing) { console.log('ℹ️ Message de rang déjà présent, pas de repost.'); return; }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🏆 Choisis ton rang Rocket League')
+    .setDescription('**Étape 1 :** Clique sur ton rang.\n**Étape 2 :** Choisis ta plateforme.\n\nTu peux changer à tout moment.')
+    .setColor(0x5865f2)
+    .setImage(WELCOME_IMAGE);
+
+  await channel.send({ embeds: [embed], components: buildRankButtons() });
+  console.log('✅ Message de rang envoyé.');
+}
+
+async function setupChannelPermissions(guild) {
+  const wallterRole = guild.roles.cache.get(AUTO_ROLE_ID);
+  if (!wallterRole) { console.error('❌ Rôle WALLTER korp introuvable pour les permissions.'); return; }
+
+  for (const channel of guild.channels.cache.values()) {
+    if (channel.type === 4) continue;
+    const isVisible = channel.id === RANK_CHANNEL_ID || channel.id === WELCOME_CHANNEL_ID;
+    try {
+      await channel.permissionOverwrites.edit(wallterRole, {
+        ViewChannel:  isVisible,
+        SendMessages: false,
+      });
+    } catch (err) {
+      console.error(`❌ Erreur permissions sur #${channel.name} :`, err.message);
+    }
+  }
+  console.log('✅ Permissions des salons configurées.');
+}
+
+// ── Shop Rocket League ────────────────────────────────────────────────────
+const puppeteer = require('puppeteer');
+
+async function fetchShopItems() {
+  const browser = await puppeteer.launch({
+    headless: 'shell',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setDefaultNavigationTimeout(30000);
+
+    // Récupère les onglets depuis la page principale
+    await page.goto('https://rlshop.gg/', { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 4000));
+
+    const tabs = await page.evaluate(() => {
+      return [...document.querySelectorAll('a[href]')]
+        .map(a => ({ text: a.innerText?.trim().toUpperCase(), href: a.getAttribute('href') }))
+        .filter(a => a.text && a.href && /^\/\d*$/.test(a.href) && a.text.length > 2)
+        .filter((a, i, arr) => arr.findIndex(b => b.href === a.href) === i);
+    });
+
+    const result = [];
+
+    for (const tab of tabs) {
+      try {
+        const url = 'https://rlshop.gg' + tab.href;
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await new Promise(r => setTimeout(r, 3000));
+
+        const items = await page.evaluate(() => {
+          const results = [];
+          document.querySelectorAll('div.group').forEach(card => {
+            const label = card.querySelector('[aria-label]');
+            const name  = label ? label.getAttribute('aria-label') : '';
+            if (!name) return;
+            const imgStyle = label.getAttribute('style') || '';
+            const imgMatch = imgStyle.match(/url\('([^']+)'\)/);
+            const imgUrl   = imgMatch ? 'https://rlshop.gg' + imgMatch[1] : '';
+            const text     = card.innerText || '';
+            const priceMatch = text.match(/\b(\d{2,5})\b/);
+            const paintMatch = text.match(/(Crimson|Cobalt|Forest Green|Sky Blue|Saffron|Purple|Black|Titanium White)/i);
+            results.push({
+              name,
+              img:   imgUrl,
+              price: priceMatch?.[1] || '?',
+              paint: paintMatch?.[1] || '',
+            });
+          });
+          return results;
+        });
+
+        if (items.length > 0) result.push({ tab: tab.text, items });
+      } catch (e) {
+        console.error(`⚠️ Onglet ${tab.text} ignoré :`, e.message);
+      }
+    }
+
+    return result;
+  } finally {
+    await browser.close();
+  }
+}
+
+// Cache du shop
+let shopCache = { tabs: [], fetchedAt: 0 };
+
+async function getShopTabs() {
+  const AGE = Date.now() - shopCache.fetchedAt;
+  if (shopCache.tabs.length > 0 && AGE < 30 * 60 * 1000) return shopCache.tabs;
+  console.log('🔄 Récupération du shop...');
+  shopCache.tabs     = await fetchShopItems();
+  shopCache.fetchedAt = Date.now();
+  console.log(`✅ Shop chargé — ${shopCache.tabs.length} onglets`);
+  return shopCache.tabs;
+}
+
+const CAT_COLORS = {
+  'Animated Decal': 0xff4da6,
+  'Decal':          0xff9900,
+  'Wheels':         0x00cfff,
+  'Rocket Boost':   0xf1c40f,
+  'Goal Explosion': 0xe74c3c,
+  'Trail':          0x9b59b6,
+  'Topper':         0x2ecc71,
+  'Antenna':        0x1abc9c,
+  'Body':           0x3498db,
+  'Autre':          0x5865f2,
+};
+
+function buildShopCategoryButtons(categories) {
+  const rows = [];
+  const cats = [...categories];
+  for (let i = 0; i < cats.length; i += 5) {
+    const row = new ActionRowBuilder();
+    cats.slice(i, i + 5).forEach(cat => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`shop_cat_${cat}`)
+          .setLabel(cat)
+          .setStyle(ButtonStyle.Primary)
+      );
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function sendShop(guild) {
+  const channel = guild.channels.cache.get(SHOP_CHANNEL_ID);
+  if (!channel) { console.error('❌ Salon shop introuvable.'); return; }
+
+  let tabs = [];
+  try { tabs = await getShopTabs(); }
+  catch (err) { console.error('❌ Erreur shop :', err.message); return; }
+
+  if (tabs.length === 0) { console.log('⚠️ Shop vide.'); return; }
+
+  // Supprime l'ancien message
+  try {
+    const old = await channel.messages.fetch({ limit: 10 });
+    const botMsg = old.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Shop Rocket League'));
+    if (botMsg) await botMsg.delete().catch(() => {});
+  } catch {}
+
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const totalItems = tabs.reduce((acc, t) => acc + t.items.length, 0);
+
+  const embed = new EmbedBuilder()
+    .setTitle('🛒 Shop Rocket League du jour')
+    .setDescription(`**${dateStr}** — ${totalItems} items disponibles\n\nClique sur une catégorie pour voir les items avec leurs images.`)
+    .setColor(0x5865f2)
+    .setImage('https://www.operationsports.com/wp-content/uploads/2025/03/RL.jpg?fit=1200%2C675')
+    .setTimestamp()
+    .setFooter({ text: 'Renouvellement à 19h00 UTC • Source : rlshop.gg' });
+
+  // Boutons par onglet (max 25 boutons = 5 lignes de 5)
+  const rows = [];
+  for (let i = 0; i < tabs.length && i < 25; i += 5) {
+    const row = new ActionRowBuilder();
+    tabs.slice(i, i + 5).forEach(t => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`shop_tab_${t.tab}`)
+          .setLabel(t.tab)
+          .setStyle(ButtonStyle.Primary)
+      );
+    });
+    rows.push(row);
+  }
+
+  await channel.send({ embeds: [embed], components: rows });
+  console.log(`✅ Shop envoyé — ${totalItems} items, ${tabs.length} onglets`);
+}
+
+// ── Tracker Rocket League ─────────────────────────────────────────────────
+
+// Emojis custom par rang (nom:id)
+const RANK_EMOJIS = {
+  'Bronze I':            '<:Bronze1:643180472804966400>',
+  'Bronze II':           '<:Bronze2:643180466240749568>',
+  'Bronze III':          '<:Bronze3:1472035459583574077>',
+  'Silver I':            '<:Argent1:643180450461909032>',
+  'Silver II':           '<:Argent2:643180441926631445>',
+  'Silver III':          '<:Argent3:643180434007785493>',
+  'Gold I':              '<:Or1:643180410246791213>',
+  'Gold II':             '<:Or2:643180399370960946>',
+  'Gold III':            '<:Or3:643180390986547200>',
+  'Platinum I':          '<:Platine1:643180373337178112>',
+  'Platinum II':         '<:Platine2:643180361613967379>',
+  'Platinum III':        '<:Platine3:643180352910917662>',
+  'Diamond I':           '<:Diamant1:643180330412539915>',
+  'Diamond II':          '<:Diamant2:1472041347786735697>',
+  'Diamond III':         '<:Diamant3:1472041508072067216>',
+  'Champion I':          '<:Champion1:643180293448007680>',
+  'Champion II':         '<:Champion2:643180282857521163>',
+  'Champion III':        '<:Champion3:643180274175180820>',
+  'Grand Champion I':    '<:grandchampion1:1465401214199140434>',
+  'Grand Champion II':   '<:GrandChampion2:758821306170343464>',
+  'Grand Champion III':  '<:GrandChampion3:758821325321011260>',
+  'Supersonic Legend':   '<:SupersonicLegend:758821358993408020>',
+};
+
+function getRankEmoji(rankName) {
+  if (!rankName) return '❓';
+  // Correspondance exacte
+  if (RANK_EMOJIS[rankName]) return RANK_EMOJIS[rankName];
+  // Correspondance insensible à la casse
+  const lower = rankName.toLowerCase();
+  for (const [key, emoji] of Object.entries(RANK_EMOJIS)) {
+    if (key.toLowerCase() === lower) return emoji;
+  }
+  // Correspondance partielle
+  for (const [key, emoji] of Object.entries(RANK_EMOJIS)) {
+    if (lower.includes(key.toLowerCase()) || key.toLowerCase().includes(lower)) return emoji;
+  }
+  return '❓';
+}
+
+// Thumbnail du rang pour l'embed
+const RANK_THUMBNAILS = {
+  'Bronze':           'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/1.png',
+  'Silver':           'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/4.png',
+  'Gold':             'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/7.png',
+  'Platinum':         'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/10.png',
+  'Diamond':          'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/13.png',
+  'Champion':         'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/16.png',
+  'Grand Champion':   'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/19.png',
+  'Supersonic Legend':'https://trackercdn.com/cdn/tracker.gg/rocket-league/ranks/22.png',
+};
+
+function getRankThumbnail(rankName) {
+  if (!rankName) return null;
+  for (const [key, url] of Object.entries(RANK_THUMBNAILS)) {
+    if (rankName.toLowerCase().includes(key.toLowerCase())) return url;
+  }
+  return null;
+}
+
+const PLATFORM_MAP = {
+  'epic':  'Epic Games',
+  'steam': 'Steam',
+  'psn':   'PlayStation',
+  'xbl':   'Xbox',
+};
+
+async function fetchTrackerStats(platform, username) {
+  const puppeteer = require('puppeteer');
+  const browser = await puppeteer.launch({ headless: 'shell', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36');
+    const url = `https://rocketleague.tracker.network/rocket-league/profile/${platform}/${encodeURIComponent(username)}/overview`;
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 5000));
+
+    const data = await page.evaluate(() => {
+      const text = document.body.innerText;
+      if (text.includes('PLAYER NOT FOUND') || text.includes('could not find')) {
+        return { error: 'Joueur introuvable.' };
+      }
+
+      const nameEl = document.querySelector('h1');
+      const name = nameEl ? nameEl.innerText.trim().split('\n')[0] : '';
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+      // Convertit MMR en rang
+      function mmrToRank(mmr) {
+        const n = parseInt(String(mmr).replace(/,/g, ''));
+        if (isNaN(n)) return '';
+        if (n < 92)   return 'Bronze I';
+        if (n < 183)  return 'Bronze II';
+        if (n < 275)  return 'Bronze III';
+        if (n < 358)  return 'Silver I';
+        if (n < 441)  return 'Silver II';
+        if (n < 524)  return 'Silver III';
+        if (n < 581)  return 'Gold I';
+        if (n < 638)  return 'Gold II';
+        if (n < 695)  return 'Gold III';
+        if (n < 762)  return 'Platinum I';
+        if (n < 829)  return 'Platinum II';
+        if (n < 895)  return 'Platinum III';
+        if (n < 962)  return 'Diamond I';
+        if (n < 1028) return 'Diamond II';
+        if (n < 1095) return 'Diamond III';
+        if (n < 1162) return 'Champion I';
+        if (n < 1228) return 'Champion II';
+        if (n < 1295) return 'Champion III';
+        if (n < 1395) return 'Grand Champion I';
+        if (n < 1495) return 'Grand Champion II';
+        if (n < 1595) return 'Grand Champion III';
+        return 'Supersonic Legend';
+      }
+
+      const modes = {
+        '1v1': 'RANKED DUEL 1V1',
+        '2v2': 'RANKED DOUBLES 2V2',
+        '3v3': 'RANKED STANDARD 3V3',
+      };
+
+      const ranks = {};
+      for (const [key, label] of Object.entries(modes)) {
+        const idx = lines.findIndex(l => l === label);
+        if (idx === -1) continue;
+        // Current MMR est 2 lignes après
+        const currentIdx = lines.findIndex((l, i) => i > idx && l === 'Current');
+        if (currentIdx !== -1 && lines[currentIdx + 1]) {
+          const mmr = lines[currentIdx + 1].replace(/,/g, '');
+          if (/^\d+$/.test(mmr)) {
+            ranks[key] = { rank: mmrToRank(mmr), mmr };
+          }
+        }
+      }
+
+      // Peak rank — cherche "Peak Rating" puis le MMR le plus haut
+      let peakRank = '', peakMmr = '', peakSeason = '';
+      const peakIdx = lines.findIndex(l => l === 'Peak Rating');
+      if (peakIdx !== -1) {
+        // Cherche le rang juste après
+        for (let i = peakIdx + 1; i < Math.min(peakIdx + 15, lines.length); i++) {
+          const rankMatch = lines[i].match(/^(Bronze|Silver|Gold|Platinum|Diamond|Champion|Grand Champion|Supersonic Legend)\s*(I{0,3}V?I{0,3})?/i);
+          if (rankMatch && !peakRank) {
+            peakRank = rankMatch[2] ? `${rankMatch[1]} ${rankMatch[2].trim()}` : rankMatch[1];
+          }
+          const mmrMatch = lines[i].match(/^([\d,]{3,7})$/);
+          if (mmrMatch && !peakMmr) peakMmr = mmrMatch[1].replace(/,/g, '');
+          const seasonMatch = lines[i].match(/Season (\d+)/i);
+          if (seasonMatch) peakSeason = seasonMatch[1];
+          if (peakRank && peakMmr) break;
+        }
+      }
+
+      // Fallback : peak depuis la section du haut (ligne 23 environ)
+      if (!peakMmr) {
+        // Cherche le premier MMR numérique après "Ranked X 2v2" ou similaire
+        const firstModeIdx = lines.findIndex(l => /Ranked (Duel|Doubles|Standard)/.test(l));
+        if (firstModeIdx > 0 && lines[firstModeIdx + 1]) {
+          const m = lines[firstModeIdx + 1].replace(/,/g, '');
+          if (/^\d+$/.test(m)) peakMmr = m;
+          if (peakMmr) peakRank = mmrToRank(peakMmr);
+        }
+      }
+
+      return { name, ranks, peakRank, peakMmr, peakSeason };
+    });
+
+    return data;
+  } finally {
+    await browser.close();
+  }
+}
+
+function buildTrackerMessage() {
+  const embed = new EmbedBuilder()
+    .setTitle('🎮 Tracker Rocket League')
+    .setDescription('Sélectionne ta plateforme puis entre ton nom de joueur.')
+    .setColor(0x5865f2)
+    .setImage(WELCOME_IMAGE);
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('tracker_epic').setLabel('Epic Games').setEmoji('🖥️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('tracker_steam').setLabel('Steam').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('tracker_psn').setLabel('PlayStation').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('tracker_xbl').setLabel('Xbox').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+async function setupTrackerMessage(guild) {
+  const channel = guild.channels.cache.get(TRACKER_CHANNEL_ID);
+  if (!channel) { console.error('❌ Salon tracker introuvable.'); return; }
+
+  const messages = await channel.messages.fetch({ limit: 20 });
+  const existing = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Tracker Rocket League'));
+  if (existing) { console.log('ℹ️ Message tracker déjà présent.'); return; }
+
+  await channel.send(buildTrackerMessage());
+  console.log('✅ Message tracker envoyé.');
+}
+
+// ── Démarrage ─────────────────────────────────────────────────────────────
+client.once('ready', async () => {
+  console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
+
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('live')
+      .setDescription('Envoie une annonce de live TikTok en DM à tous les membres')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('ban')
+      .setDescription('Bannir un utilisateur')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.BanMembers)
+      .addUserOption(opt => opt.setName('utilisateur').setDescription('Le membre à bannir').setRequired(true))
+      .addStringOption(opt => opt.setName('raison').setDescription('Raison du ban').setRequired(false))
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('unban')
+      .setDescription('Débannir un utilisateur')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.BanMembers)
+      .toJSON(),
+  ];
+
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+  for (const guild of client.guilds.cache.values()) {
+    await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands })
+      .then(() => console.log(`✅ Commande /live enregistrée sur ${guild.name}`))
+      .catch(console.error);
+  }
+
+  for (const guild of client.guilds.cache.values()) {
+    await guild.members.fetch();
+    await guild.roles.fetch();
+    await setupRankMessage(guild);
+    await setupChannelPermissions(guild);
+    // await sendShop(guild); // désactivé
+    await setupTrackerMessage(guild);
+  }
+
+  // Envoi automatique du shop tous les jours à 19h00 UTC (shop RL se renouvelle à cette heure)
+  cron.schedule('0 19 * * *', async () => {
+    console.log('🕖 Mise à jour automatique du shop...');
+    for (const guild of client.guilds.cache.values()) {
+      await sendShop(guild);
+    }
+  }, { timezone: 'UTC' });
+});
+
+// ── Bienvenue ─────────────────────────────────────────────────────────────
+client.on('guildMemberAdd', async (member) => {
+  const role = member.guild.roles.cache.get(AUTO_ROLE_ID);
+  if (role) await member.roles.add(role).catch((err) => console.error(`❌ Rôle : ${err.message}`));
+
+  const channel = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setTitle(`Bienvenue ${member.user.username} !`)
+    .setDescription(`Content de t'accueillir, **${member.user.username}** !\n\nVa dans le salon **#rôles** pour choisir ton rang et ta plateforme.`)
+    .setImage(WELCOME_IMAGE)
+    .setColor(0x5865f2)
+    .setThumbnail(member.user.displayAvatarURL({ dynamic: true, size: 256 }))
+    .setFooter({ text: `Membre #${member.guild.memberCount}` })
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+});
+
+// ── Interactions ──────────────────────────────────────────────────────────
+client.on('interactionCreate', async (interaction) => {
+
+  // /live
+  if (interaction.isChatInputCommand() && interaction.commandName === 'live') {
+    if (interaction.user.id !== LIVE_ALLOWED_USER) {
+      return interaction.reply({ content: '❌ Permission refusée.', ephemeral: true });
+    }
+
+    await interaction.reply({ content: '📨 Envoi en cours...', ephemeral: true });
+
+    const embed = new EmbedBuilder()
+      .setTitle('🔴 Wallter est en LIVE sur TikTok !')
+      .setDescription(`**Wallter_RL** est en live !\n\n🎮 ${TIKTOK_URL}`)
+      .setColor(0xff0050)
+      .setImage(WELCOME_IMAGE)
+      .setTimestamp();
+
+    const members = await interaction.guild.members.fetch();
+    let envoyes = 0, echecs = 0;
+    for (const member of members.values()) {
+      if (member.user.bot) continue;
+      try { await member.send({ embeds: [embed] }); envoyes++; }
+      catch { echecs++; }
+    }
+
+    await interaction.editReply({ content: `✅ ${envoyes} DM(s) envoyé(s), ${echecs} échec(s).` });
+    console.log(`📢 /live — ${envoyes} DMs envoyés, ${echecs} échecs.`);
+    return;
+  }
+
+  // /ban
+  if (interaction.isChatInputCommand() && interaction.commandName === 'ban') {
+    const allowedRoles = ['1522018910948425889', '1522019388264546314']; // Owner, Fondateur
+    const hasRole = allowedRoles.some(r => interaction.member.roles.cache.has(r));
+    if (!hasRole) {
+      return interaction.reply({ content: '❌ Seuls les Owner et Fondateur peuvent utiliser cette commande.', ephemeral: true });
+    }
+    const target = interaction.options.getUser('utilisateur');
+    const raison  = interaction.options.getString('raison') || 'Aucune raison fournie';
+
+    try {
+      await interaction.guild.members.ban(target.id, { reason: raison, deleteMessageSeconds: 604800 });
+      await interaction.reply({ content: `✅ **${target.username}** a été banni.\nRaison : **${raison}**`, ephemeral: true });
+      console.log(`🔨 Ban : ${target.tag} — ${raison}`);
+    } catch (err) {
+      await interaction.reply({ content: `❌ Impossible de bannir : ${err.message}`, ephemeral: true });
+    }
+    return;
+  }
+
+  // /unban
+  if (interaction.isChatInputCommand() && interaction.commandName === 'unban') {
+    const allowedRoles = ['1522018910948425889', '1522019388264546314']; // Owner, Fondateur
+    const hasRole = allowedRoles.some(r => interaction.member.roles.cache.has(r));
+    if (!hasRole) {
+      return interaction.reply({ content: '❌ Seuls les Owner et Fondateur peuvent utiliser cette commande.', ephemeral: true });
+    }
+
+    // Récupère la liste des bannis
+    const bans = await interaction.guild.bans.fetch();
+    if (bans.size === 0) {
+      return interaction.reply({ content: 'Aucun membre banni sur ce serveur.', ephemeral: true });
+    }
+
+    // Affiche un menu déroulant avec les 25 premiers bannis
+    const options = bans.first(25).map(ban => ({
+      label: ban.user.username,
+      description: `ID : ${ban.user.id}`,
+      value: ban.user.id,
+    }));
+
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('unban_select')
+        .setPlaceholder('Choisir un membre à débannir')
+        .addOptions(options)
+    );
+
+    await interaction.reply({ content: `**${bans.size}** membre(s) banni(s). Sélectionne celui à débannir :`, components: [row], ephemeral: true });
+    return;
+  }
+
+  // Menu déroulant unban
+  if (interaction.isStringSelectMenu() && interaction.customId === 'unban_select') {
+    const allowedRoles = ['1522018910948425889', '1522019388264546314'];
+    const hasRole = allowedRoles.some(r => interaction.member.roles.cache.has(r));
+    if (!hasRole) return interaction.reply({ content: '❌ Permission refusée.', ephemeral: true });
+
+    const id = interaction.values[0];
+    try {
+      const ban = await interaction.guild.bans.fetch(id);
+      await interaction.guild.bans.remove(id);
+      await interaction.update({ content: `✅ **${ban.user.username}** a été débanni.`, components: [] });
+      console.log(`✅ Unban : ${ban.user.tag}`);
+    } catch (err) {
+      await interaction.update({ content: `❌ Erreur : ${err.message}`, components: [] });
+    }
+    return;
+  }
+
+  // ── Modal TRACKER soumise ──
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('tracker_search_')) {
+    const platform  = interaction.customId.replace('tracker_search_', '');
+    const username  = interaction.fields.getTextInputValue('tracker_username').trim();
+
+    await interaction.reply({ content: `🔍 Recherche de **${username}** sur ${PLATFORM_MAP[platform] || platform}...`, ephemeral: true });
+
+    let stats;
+    try {
+      stats = await fetchTrackerStats(platform, username);
+    } catch (err) {
+      return interaction.editReply({ content: `❌ Erreur lors de la recherche : ${err.message}` });
+    }
+
+    if (stats.error) return interaction.editReply({ content: `❌ ${stats.error}` });
+
+    const peakImg = getRankThumbnail(stats.peakRank);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`${stats.name || username} — Stats Rocket League`)
+      .setColor(0x5865f2)
+      .setFooter({ text: `${PLATFORM_MAP[platform] || platform} • Source : tracker.gg` });
+
+    if (peakImg) embed.setThumbnail(peakImg);
+
+    if (stats.peakRank) {
+      const peakEmoji = getRankEmoji(stats.peakRank);
+      const peakThumb = getRankThumbnail(stats.peakRank);
+      if (peakThumb) embed.setThumbnail(peakThumb);
+      embed.addFields({
+        name: '🏆 Peak Rank',
+        value: `${peakEmoji} **${stats.peakRank}**${stats.peakMmr ? ` — ${stats.peakMmr} MMR` : ''}${stats.peakSeason ? ` *(Saison ${stats.peakSeason})*` : ''}`,
+        inline: false,
+      });
+    }
+
+    const modes = [
+      { key: '1v1', label: '1v1' },
+      { key: '2v2', label: '2v2' },
+      { key: '3v3', label: '3v3' },
+    ];
+
+    for (const mode of modes) {
+      const r = stats.ranks?.[mode.key];
+      const emoji = r ? getRankEmoji(r.rank) : '';
+      embed.addFields({
+        name: mode.label,
+        value: r ? `${emoji} **${r.rank}**\n${r.mmr} MMR` : 'Non classé',
+        inline: true,
+      });
+    }
+
+    await interaction.editReply({ content: '', embeds: [embed] });
+    return;
+  }
+
+  if (!interaction.isButton()) return;
+
+  // ── Boutons TRACKER plateforme ──
+  if (interaction.customId.startsWith('tracker_') && !interaction.customId.startsWith('tracker_search_')) {
+    const platform = interaction.customId.replace('tracker_', '');
+    const modal = new ModalBuilder()
+      .setCustomId(`tracker_search_${platform}`)
+      .setTitle(`Recherche ${PLATFORM_MAP[platform] || platform}`);
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('tracker_username')
+          .setLabel('Nom du joueur')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Ex: Wallter_RL')
+          .setRequired(true)
+      )
+    );
+    await interaction.showModal(modal);
+    return;
+  }
+  if (interaction.customId.startsWith('shop_tab_')) {
+    const tabName = interaction.customId.replace('shop_tab_', '');
+    let tabs = [];
+    try { tabs = await getShopTabs(); }
+    catch { return interaction.reply({ content: '❌ Erreur shop.', ephemeral: true }); }
+
+    const tab = tabs.find(t => t.tab === tabName);
+    if (!tab || tab.items.length === 0) {
+      return interaction.reply({ content: 'Aucun item dans cet onglet.', ephemeral: true });
+    }
+
+    const embeds = tab.items.map(item => {
+      const paintStr = item.paint ? ` — ${item.paint}` : '';
+      return new EmbedBuilder()
+        .setTitle(`${item.name}${paintStr}`)
+        .setDescription(`**${item.price} crédits**`)
+        .setThumbnail(item.img || null)
+        .setColor(CAT_COLORS[tabName] ?? 0x5865f2);
+    });
+
+    await interaction.reply({ embeds: embeds.slice(0, 10), ephemeral: true });
+    return;
+  }
+
+  const member = interaction.member;
+  const guild  = interaction.guild;
+
+  // Rang
+  const rank = RANKS.find((r) => r.id === interaction.customId);
+  if (rank) {
+    pendingRank.set(member.id, rank.id);
+    const allRankRoleIds = Object.values(rankRoleIds);
+    const toRemove = member.roles.cache.filter((r) => allRankRoleIds.includes(r.id));
+    if (toRemove.size > 0) await member.roles.remove(toRemove).catch(() => {});
+    const roleId = rankRoleIds[rank.id];
+    if (roleId) await member.roles.add(roleId).catch(() => {});
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Rang ${rank.name} sélectionné !`)
+      .setDescription('Choisis maintenant ta plateforme 🎮')
+      .setColor(rank.color);
+
+    await interaction.reply({ embeds: [embed], components: buildPlatformButtons(), ephemeral: true });
+    return;
+  }
+
+  // Plateforme
+  const platform = PLATFORMS.find((p) => p.id === interaction.customId);
+  if (platform) {
+    const allPlatRoleIds = Object.values(platformRoleIds);
+    const toRemove = member.roles.cache.filter((r) => allPlatRoleIds.includes(r.id));
+    if (toRemove.size > 0) await member.roles.remove(toRemove).catch(() => {});
+    const roleId = platformRoleIds[platform.id];
+    if (roleId) await member.roles.add(roleId).catch(() => {});
+
+    const wallterRole = guild.roles.cache.get(AUTO_ROLE_ID);
+    if (wallterRole && member.roles.cache.has(AUTO_ROLE_ID)) {
+      await member.roles.remove(wallterRole).catch(() => {});
+    }
+
+    pendingRank.delete(member.id);
+    const rankId   = [...Object.entries(rankRoleIds)].find(([, v]) => member.roles.cache.has(v))?.[0];
+    const rankName = RANKS.find((r) => r.id === rankId)?.name ?? 'inconnu';
+
+    await interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('✅ Configuration terminée !')
+          .setDescription(`Rang : **${rankName}**\nPlateforme : **${platform.name}**\n\nBienvenue ! Tu as accès à tous les salons.`)
+          .setColor(0x57f287),
+      ],
+      components: [],
+    });
+    return;
+  }
+});
+
+// ── Anti-spam + Anti-lien ─────────────────────────────────────────────────
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (!message.guild) return;
+
+  const member = message.member ?? await message.guild.members.fetch(message.author.id).catch(() => null);
+  if (!member) return;
+  if (member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+  if (LINK_REGEX.test(message.content)) {
+    const hasAllowedRole = LINK_ALLOWED_ROLES.some((id) => member.roles.cache.has(id));
+    if (hasAllowedRole) return;
+    await message.delete().catch(() => {});
+    await timeoutMember(member, TIMEOUT_LINK);
+    console.log(`🔗 Lien → timeout 5 min : ${message.author.tag}`);
+    return;
+  }
+
+  const userId = message.author.id;
+  if (!spamMap.has(userId)) spamMap.set(userId, { count: 0, resetTimer: null });
+  const data = spamMap.get(userId);
+  data.count++;
+  if (data.resetTimer) clearTimeout(data.resetTimer);
+  data.resetTimer = setTimeout(() => spamMap.delete(userId), SPAM_WINDOW);
+
+  if (data.count > SPAM_THRESHOLD_HEAVY) {
+    spamMap.delete(userId);
+    await purgeRecentMessages(message.channel, userId);
+    await timeoutMember(member, TIMEOUT_SPAM_HEAVY);
+    console.log(`🚨 Spam extrême → purge + timeout 1h : ${message.author.tag}`);
+  } else if (data.count > SPAM_THRESHOLD_LIGHT) {
+    spamMap.delete(userId);
+    await purgeRecentMessages(message.channel, userId);
+    await timeoutMember(member, TIMEOUT_SPAM_LIGHT);
+    console.log(`⚠️ Spam → purge + timeout 1 min : ${message.author.tag}`);
+  }
+});
+
+client.login(process.env.DISCORD_TOKEN);
