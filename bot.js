@@ -2,6 +2,7 @@
 if (!process.env.DISCORD_TOKEN) {
   try { require('dotenv').config(); } catch {}
 }
+const { startPanel } = require('./panel/server');
 const {
   Client,
   GatewayIntentBits,
@@ -18,10 +19,26 @@ const {
   Routes,
   SlashCommandBuilder,
 } = require('discord.js');
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  entersState,
+  getVoiceConnection,
+} = require('@discordjs/voice');
+const playdl = require('play-dl');
+// Force ffmpeg-static comme encoder audio
+process.env.FFMPEG_PATH = require('ffmpeg-static');
 const cron = require('node-cron');
+
+// ── Lecteur audio (un par serveur) ───────────────────────────────────────
+const audioPlayers = new Map(); // guildId → { player, connection, queue, current }
 
 const SHOP_CHANNEL_ID    = '1522054947661676725';
 const TRACKER_CHANNEL_ID = '1522062347651387553';
+const GMR_CHANNEL_ID     = '1522142723291742310'; // Guess My Rank
 
 const client = new Client({
   intents: [
@@ -29,6 +46,7 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
@@ -199,7 +217,92 @@ async function setupChannelPermissions(guild) {
   console.log('✅ Permissions des salons configurées.');
 }
 
-// ── Shop Rocket League ────────────────────────────────────────────────────
+// ── Guess My Rank ──────────────────────────────────────────────────────────
+const fs = require('fs');
+const GMR_DATA_FILE = './gmr_data.json';
+
+function loadGmrData() {
+  try { return JSON.parse(fs.readFileSync(GMR_DATA_FILE, 'utf8')); }
+  catch { return { videos: [], scores: {} }; }
+}
+function saveGmrData(data) {
+  fs.writeFileSync(GMR_DATA_FILE, JSON.stringify(data, null, 2));
+}
+
+// Sessions actives : Map<userId, { videos: [], index: 0, score: 0, messageId }>
+const gmrSessions = new Map();
+// Publish en attente : Map<userId, { channelId, step, mediaUrl? }>
+const gmrPendingPublish = new Map();
+
+const GMR_RANKS = [
+  { id: 'gmr_Bronze1',    label: 'Bronze I',           emoji: '<:Bronze1:643180472804966400>' },
+  { id: 'gmr_Bronze2',    label: 'Bronze II',          emoji: '<:Bronze2:643180466240749568>' },
+  { id: 'gmr_Bronze3',    label: 'Bronze III',         emoji: '<:Bronze3:1472035459583574077>' },
+  { id: 'gmr_Argent1',    label: 'Argent I',           emoji: '<:Argent1:643180450461909032>' },
+  { id: 'gmr_Argent2',    label: 'Argent II',          emoji: '<:Argent2:643180441926631445>' },
+  { id: 'gmr_Argent3',    label: 'Argent III',         emoji: '<:Argent3:643180434007785493>' },
+  { id: 'gmr_Or1',        label: 'Or I',               emoji: '<:Or1:643180410246791213>' },
+  { id: 'gmr_Or2',        label: 'Or II',              emoji: '<:Or2:643180399370960946>' },
+  { id: 'gmr_Or3',        label: 'Or III',             emoji: '<:Or3:643180390986547200>' },
+  { id: 'gmr_Platine1',   label: 'Platine I',          emoji: '<:Platine1:643180373337178112>' },
+  { id: 'gmr_Platine2',   label: 'Platine II',         emoji: '<:Platine2:643180361613967379>' },
+  { id: 'gmr_Platine3',   label: 'Platine III',        emoji: '<:Platine3:643180352910917662>' },
+  { id: 'gmr_Diamant1',   label: 'Diamant I',          emoji: '<:Diamant1:643180330412539915>' },
+  { id: 'gmr_Diamant2',   label: 'Diamant II',         emoji: '<:Diamant2:1472041347786735697>' },
+  { id: 'gmr_Diamant3',   label: 'Diamant III',        emoji: '<:Diamant3:1472041508072067216>' },
+  { id: 'gmr_Champion1',  label: 'Champion I',         emoji: '<:Champion1:643180293448007680>' },
+  { id: 'gmr_Champion2',  label: 'Champion II',        emoji: '<:Champion2:643180282857521163>' },
+  { id: 'gmr_Champion3',  label: 'Champion III',       emoji: '<:Champion3:643180274175180820>' },
+  { id: 'gmr_GC1',        label: 'Grand Champion I',   emoji: '<:grandchampion1:1465401214199140434>' },
+  { id: 'gmr_GC2',        label: 'Grand Champion II',  emoji: '<:GrandChampion2:758821306170343464>' },
+  { id: 'gmr_GC3',        label: 'Grand Champion III', emoji: '<:GrandChampion3:758821325321011260>' },
+  { id: 'gmr_SSL',        label: 'Supersonic Legend',  emoji: '<:SupersonicLegend:758821358993408020>' },
+];
+
+function buildGmrRankButtons() {
+  const rows = [];
+  for (let i = 0; i < GMR_RANKS.length; i += 4) {
+    const row = new ActionRowBuilder();
+    GMR_RANKS.slice(i, i + 4).forEach(r => {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(r.id)
+          .setLabel(r.label)
+          .setEmoji(r.emoji.match(/<:(\w+):(\d+)>/)
+            ? { name: r.emoji.match(/<:(\w+):(\d+)>/)[1], id: r.emoji.match(/<:(\w+):(\d+)>/)[2] }
+            : { name: r.emoji })
+          .setStyle(ButtonStyle.Secondary)
+      );
+    });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function buildGmrMainButtons() {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('gmr_play').setLabel('▶ Play').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('gmr_publish').setLabel('📤 Publier une vidéo').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('gmr_leaderboard').setLabel('🏆 Leaderboard').setStyle(ButtonStyle.Secondary),
+  )];
+}
+
+async function setupGmrMessage(guild) {
+  const channel = guild.channels.cache.get(GMR_CHANNEL_ID);
+  if (!channel) return;
+  const messages = await channel.messages.fetch({ limit: 20 });
+  const existing = messages.find(m => m.author.id === client.user.id && m.embeds[0]?.title?.includes('Guess My Rank'));
+  if (existing) { console.log('ℹ️ Message GMR déjà présent.'); return; }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🎮 Guess My Rank')
+    .setDescription('Regarde des clips Rocket League et essaie de deviner le rang du joueur !\n\n**▶ Play** — Lancer une partie (5 vidéos)\n**📤 Publier** — Ajouter ta propre vidéo\n**🏆 Leaderboard** — Voir le top 10')
+    .setColor(0x5865f2)
+    .setImage(WELCOME_IMAGE);
+
+  await channel.send({ embeds: [embed], components: buildGmrMainButtons() });
+  console.log('✅ Message GMR envoyé.');
+}
 const puppeteer = require('puppeteer');
 
 async function fetchShopItems() {
@@ -566,10 +669,59 @@ async function setupTrackerMessage(guild) {
 client.once('ready', async () => {
   console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
 
+  // Démarre le panel web
+  startPanel(client, audioPlayers, 3001);
+
   const commands = [
     new SlashCommandBuilder()
       .setName('live')
       .setDescription('Envoie une annonce de live TikTok en DM à tous les membres')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('play')
+      .setDescription('Joue une musique YouTube dans ton salon vocal')
+      .addStringOption(opt => opt.setName('url').setDescription('URL YouTube').setRequired(true))
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('stop')
+      .setDescription('Arrête la musique et vide la file')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('skip')
+      .setDescription('Passe à la musique suivante')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('queue')
+      .setDescription('Affiche la file d\'attente')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('leave')
+      .setDescription('Fait quitter le bot du salon vocal')
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('mute')
+      .setDescription('Rend un membre muet')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.MuteMembers)
+      .addUserOption(opt => opt.setName('utilisateur').setDescription('Membre à muter').setRequired(true))
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('unmute')
+      .setDescription('Retire le mute d\'un membre')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.MuteMembers)
+      .addUserOption(opt => opt.setName('utilisateur').setDescription('Membre à démuter').setRequired(true))
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('kick')
+      .setDescription('Expulse un membre du serveur')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.KickMembers)
+      .addUserOption(opt => opt.setName('utilisateur').setDescription('Membre à expulser').setRequired(true))
+      .addStringOption(opt => opt.setName('raison').setDescription('Raison').setRequired(false))
+      .toJSON(),
+    new SlashCommandBuilder()
+      .setName('clear')
+      .setDescription('Supprime des messages dans le salon')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageMessages)
+      .addIntegerOption(opt => opt.setName('nombre').setDescription('Nombre de messages à supprimer (1-100)').setRequired(true).setMinValue(1).setMaxValue(100))
       .toJSON(),
     new SlashCommandBuilder()
       .setName('ban')
@@ -599,6 +751,7 @@ client.once('ready', async () => {
     await setupChannelPermissions(guild);
     // await sendShop(guild); // désactivé
     await setupTrackerMessage(guild);
+    await setupGmrMessage(guild);
   }
 
   // Envoi automatique du shop tous les jours à 19h00 UTC (shop RL se renouvelle à cette heure)
@@ -731,6 +884,19 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // ── GMR Modal soumise ──
+  if (interaction.isModalSubmit() && interaction.customId === 'gmr_publish_modal') {
+    const videoUrl = interaction.fields.getTextInputValue('gmr_video_url').trim();
+    const rankId   = interaction.fields.getTextInputValue('gmr_rank').trim();
+    const rank     = GMR_RANKS.find(r => r.label.toLowerCase() === rankId.toLowerCase() || r.id === rankId);
+    if (!rank) return interaction.reply({ content: '❌ Rang invalide. Ex: `Platine II`', ephemeral: true });
+    const data = loadGmrData();
+    data.videos.push({ url: videoUrl, rank: rank.label, emoji: rank.emoji, addedBy: interaction.user.id, addedAt: Date.now() });
+    saveGmrData(data);
+    await interaction.reply({ content: `✅ Vidéo ajoutée avec le rang **${rank.emoji} ${rank.label}** !`, ephemeral: true });
+    return;
+  }
+
   // ── Modal TRACKER soumise ──
   if (interaction.isModalSubmit() && interaction.customId.startsWith('tracker_search_')) {
     const platform  = interaction.customId.replace('tracker_search_', '');
@@ -788,6 +954,87 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (!interaction.isButton()) return;
+
+  // ── Boutons GMR ──
+  if (interaction.customId === 'gmr_play') {
+    const data = loadGmrData();
+    if (data.videos.length < 1) return interaction.reply({ content: '❌ Aucune vidéo disponible. Publie-en une avec **📤 Publier** !', ephemeral: true });
+    const shuffled = [...data.videos].sort(() => Math.random() - 0.5).slice(0, 5);
+    gmrSessions.set(interaction.user.id, { videos: shuffled, index: 0, score: 0 });
+    const video = shuffled[0];
+    const embed = new EmbedBuilder()
+      .setTitle('🎮 Guess My Rank — Vidéo 1/5')
+      .setDescription(`**Quel est le rang de ce joueur ?**\n\n🎬 ${video.url}`)
+      .setColor(0x5865f2)
+      .setFooter({ text: `Score : 0 | ${interaction.user.username}` });
+    await interaction.reply({ embeds: [embed], components: buildGmrRankButtons(), ephemeral: true });
+    return;
+  }
+
+  if (interaction.customId === 'gmr_publish') {
+    // Stocke que cet user est en attente d'upload
+    gmrPendingPublish.set(interaction.user.id, { channelId: interaction.channelId, step: 'waiting_media' });
+    await interaction.reply({
+      content: '📤 **Envoie ta vidéo ou image directement dans ce salon** (en pièce jointe).\nLe bot va te demander le rang ensuite.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (interaction.customId === 'gmr_leaderboard') {
+    const data = loadGmrData();
+    const sorted = Object.entries(data.scores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10);
+    const medals = ['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'];
+    const lines = sorted.length > 0
+      ? sorted.map(([id, pts], i) => `${medals[i]} <@${id}> — **${pts} point${pts > 1 ? 's' : ''}**`).join('\n')
+      : 'Aucun score pour l\'instant.';
+    const embed = new EmbedBuilder()
+      .setTitle('🏆 Leaderboard — Guess My Rank')
+      .setDescription(lines)
+      .setColor(0xf0b232);
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
+
+  // Réponse aux boutons de rang GMR
+  if (interaction.customId.startsWith('gmr_') && GMR_RANKS.find(r => r.id === interaction.customId)) {
+    const session = gmrSessions.get(interaction.user.id);
+    if (!session) return interaction.reply({ content: '❌ Lance une partie avec **▶ Play** !', ephemeral: true });
+
+    const chosen = GMR_RANKS.find(r => r.id === interaction.customId);
+    const current = session.videos[session.index];
+    const correct = chosen.label === current.rank;
+    if (correct) session.score++;
+    session.index++;
+
+    if (session.index >= session.videos.length) {
+      // Fin de partie
+      const data = loadGmrData();
+      if (!data.scores[interaction.user.id]) data.scores[interaction.user.id] = 0;
+      data.scores[interaction.user.id] += session.score;
+      saveGmrData(data);
+      gmrSessions.delete(interaction.user.id);
+
+      const embed = new EmbedBuilder()
+        .setTitle('🎮 Fin de partie !')
+        .setDescription(`${correct ? '✅ Bonne réponse !' : `❌ Mauvais rang ! C'était **${current.emoji} ${current.rank}**`}\n\n**Score final : ${session.score}/5**\n\nTon total : **${data.scores[interaction.user.id]} points**`)
+        .setColor(session.score >= 4 ? 0x23a55a : session.score >= 2 ? 0xf0b232 : 0xf23f43);
+
+      await interaction.update({ embeds: [embed], components: [] });
+    } else {
+      // Prochaine vidéo
+      const next = session.videos[session.index];
+      const embed = new EmbedBuilder()
+        .setTitle(`🎮 Guess My Rank — Vidéo ${session.index + 1}/5`)
+        .setDescription(`${correct ? '✅ Bonne réponse !' : `❌ C'était **${current.emoji} ${current.rank}**`}\n\n**Quel est le rang de ce joueur ?**\n\n🎬 ${next.url}`)
+        .setColor(0x5865f2)
+        .setFooter({ text: `Score : ${session.score} | ${interaction.user.username}` });
+      await interaction.update({ embeds: [embed], components: buildGmrRankButtons() });
+    }
+    return;
+  }
 
   // ── Boutons TRACKER plateforme ──
   if (interaction.customId.startsWith('tracker_') && !interaction.customId.startsWith('tracker_search_')) {
