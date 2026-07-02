@@ -1041,16 +1041,16 @@ client.on('interactionCreate', async (interaction) => {
   // ── Boutons GMR ──
   if (interaction.customId === 'gmr_play') {
     const data = loadGmrData();
-    if (data.videos.length < 1) return interaction.reply({ content: '❌ Aucune vidéo disponible. Publie-en une avec **📤 Publier** !', ephemeral: true });
+    if (data.videos.length < 1) return interaction.reply({ content: '❌ Aucune vidéo disponible. Publie-en une avec `/guessmyrankvideo` !', ephemeral: true });
     const shuffled = [...data.videos].sort(() => Math.random() - 0.5).slice(0, 5);
     gmrSessions.set(interaction.user.id, { videos: shuffled, index: 0, score: 0 });
     const video = shuffled[0];
-    const embed = new EmbedBuilder()
-      .setTitle('🎮 Guess My Rank — Vidéo 1/5')
-      .setDescription(`**Quel est le rang de ce joueur ?**\n\n🎬 ${video.url}`)
-      .setColor(0x5865f2)
-      .setFooter({ text: `Score : 0 | ${interaction.user.username}` });
-    await interaction.reply({ embeds: [embed], components: buildGmrRankButtons(), ephemeral: true });
+
+    // Envoie la vidéo publiquement pour qu'elle soit visible + les boutons
+    await interaction.reply({
+      content: `🎮 **${interaction.user.username}** joue à Guess My Rank !\n**Vidéo 1/5** — Quel est le rang de ce joueur ?\n\n${video.url}`,
+      components: buildGmrRankButtons(),
+    });
     return;
   }
 
@@ -1091,28 +1091,34 @@ client.on('interactionCreate', async (interaction) => {
     session.index++;
 
     if (session.index >= session.videos.length) {
-      // Fin de partie
+      // Fin de partie — retire les boutons du message public
       const data = loadGmrData();
       if (!data.scores[interaction.user.id]) data.scores[interaction.user.id] = 0;
       data.scores[interaction.user.id] += session.score;
       saveGmrData(data);
       gmrSessions.delete(interaction.user.id);
 
-      const embed = new EmbedBuilder()
-        .setTitle('🎮 Fin de partie !')
-        .setDescription(`${correct ? '✅ Bonne réponse !' : `❌ Mauvais rang ! C'était **${current.emoji} ${current.rank}**`}\n\n**Score final : ${session.score}/5**\n\nTon total : **${data.scores[interaction.user.id]} points**`)
-        .setColor(session.score >= 4 ? 0x23a55a : session.score >= 2 ? 0xf0b232 : 0xf23f43);
+      // Met à jour le message public (enlève les boutons)
+      await interaction.update({ components: [] });
 
-      await interaction.update({ embeds: [embed], components: [] });
+      // Envoie le résultat final en éphémère
+      await interaction.followUp({
+        content: `${correct ? '✅ Bonne réponse !' : `❌ C'était **${current.emoji} ${current.rank}**`}\n\n🏁 **Partie terminée !**\nScore final : **${session.score}/5**\nTon total : **${data.scores[interaction.user.id]} points**`,
+        ephemeral: true,
+      });
     } else {
-      // Prochaine vidéo
+      // Résultat en éphémère
+      await interaction.reply({
+        content: correct ? `✅ Bonne réponse ! **${current.emoji} ${current.rank}**` : `❌ C'était **${current.emoji} ${current.rank}**`,
+        ephemeral: true,
+      });
+
+      // Prochaine vidéo publiquement
       const next = session.videos[session.index];
-      const embed = new EmbedBuilder()
-        .setTitle(`🎮 Guess My Rank — Vidéo ${session.index + 1}/5`)
-        .setDescription(`${correct ? '✅ Bonne réponse !' : `❌ C'était **${current.emoji} ${current.rank}**`}\n\n**Quel est le rang de ce joueur ?**\n\n🎬 ${next.url}`)
-        .setColor(0x5865f2)
-        .setFooter({ text: `Score : ${session.score} | ${interaction.user.username}` });
-      await interaction.update({ embeds: [embed], components: buildGmrRankButtons() });
+      await interaction.channel.send({
+        content: `🎮 **${interaction.user.username}** — Vidéo ${session.index + 1}/5 — Quel est le rang ?\n\n${next.url}`,
+        components: buildGmrRankButtons(),
+      });
     }
     return;
   }
