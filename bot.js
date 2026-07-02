@@ -238,29 +238,37 @@ const gmrSessions = new Map();
 const gmrPendingPublish = new Map();
 
 const GMR_RANKS = [
-  { id: 'gmr_Bronze1',    label: 'Bronze I',           emoji: '<:Bronze1:643180472804966400>' },
-  { id: 'gmr_Bronze2',    label: 'Bronze II',          emoji: '<:Bronze2:643180466240749568>' },
-  { id: 'gmr_Bronze3',    label: 'Bronze III',         emoji: '<:Bronze3:1472035459583574077>' },
-  { id: 'gmr_Argent1',    label: 'Argent I',           emoji: '<:Argent1:643180450461909032>' },
-  { id: 'gmr_Argent2',    label: 'Argent II',          emoji: '<:Argent2:643180441926631445>' },
-  { id: 'gmr_Argent3',    label: 'Argent III',         emoji: '<:Argent3:643180434007785493>' },
-  { id: 'gmr_Or1',        label: 'Or I',               emoji: '<:Or1:643180410246791213>' },
-  { id: 'gmr_Or2',        label: 'Or II',              emoji: '<:Or2:643180399370960946>' },
-  { id: 'gmr_Or3',        label: 'Or III',             emoji: '<:Or3:643180390986547200>' },
-  { id: 'gmr_Platine1',   label: 'Platine I',          emoji: '<:Platine1:643180373337178112>' },
-  { id: 'gmr_Platine2',   label: 'Platine II',         emoji: '<:Platine2:643180361613967379>' },
-  { id: 'gmr_Platine3',   label: 'Platine III',        emoji: '<:Platine3:643180352910917662>' },
-  { id: 'gmr_Diamant1',   label: 'Diamant I',          emoji: '<:Diamant1:643180330412539915>' },
-  { id: 'gmr_Diamant2',   label: 'Diamant II',         emoji: '<:Diamant2:1472041347786735697>' },
-  { id: 'gmr_Diamant3',   label: 'Diamant III',        emoji: '<:Diamant3:1472041508072067216>' },
-  { id: 'gmr_Champion1',  label: 'Champion I',         emoji: '<:Champion1:643180293448007680>' },
-  { id: 'gmr_Champion2',  label: 'Champion II',        emoji: '<:Champion2:643180282857521163>' },
-  { id: 'gmr_Champion3',  label: 'Champion III',       emoji: '<:Champion3:643180274175180820>' },
-  { id: 'gmr_GC1',        label: 'Grand Champion I',   emoji: '<:grandchampion1:1465401214199140434>' },
-  { id: 'gmr_GC2',        label: 'Grand Champion II',  emoji: '<:GrandChampion2:758821306170343464>' },
-  { id: 'gmr_GC3',        label: 'Grand Champion III', emoji: '<:GrandChampion3:758821325321011260>' },
-  { id: 'gmr_SSL',        label: 'Supersonic Legend',  emoji: '<:SupersonicLegend:758821358993408020>' },
+  { id: 'gmr_Bronze1',   label: 'Bronze I',           emoji: '<:Bronze1:643180472804966400>',        shortcuts: ['b1','bronze1','bronze i'] },
+  { id: 'gmr_Bronze2',   label: 'Bronze II',          emoji: '<:Bronze2:643180466240749568>',        shortcuts: ['b2','bronze2','bronze ii'] },
+  { id: 'gmr_Bronze3',   label: 'Bronze III',         emoji: '<:Bronze3:1472035459583574077>',       shortcuts: ['b3','bronze3','bronze iii'] },
+  { id: 'gmr_Argent1',   label: 'Argent I',           emoji: '<:Argent1:643180450461909032>',        shortcuts: ['a1','argent1','argent i','silver1','silver i','s1'] },
+  { id: 'gmr_Argent2',   label: 'Argent II',          emoji: '<:Argent2:643180441926631445>',        shortcuts: ['a2','argent2','argent ii','silver2','silver ii','s2'] },
+  { id: 'gmr_Argent3',   label: 'Argent III',         emoji: '<:Argent3:643180434007785493>',        shortcuts: ['a3','argent3','argent iii','silver3','silver iii','s3'] },
+  { id: 'gmr_Or1',       label: 'Or I',               emoji: '<:Or1:643180410246791213>',            shortcuts: ['or1','or i','gold1','gold i','o1'] },
+  { id: 'gmr_Or2',       label: 'Or II',              emoji: '<:Or2:643180399370960946>',            shortcuts: ['or2','or ii','gold2','gold ii','o2'] },
+  { id: 'gmr_Or3',       label: 'Or III',             emoji: '<:Or3:643180390986547200>',            shortcuts: ['or3','or iii','gold3','gold iii','o3'] },
+  { id: 'gmr_Platine1',  label: 'Platine I',          emoji: '<:Platine1:643180373337178112>',       shortcuts: ['p1','platine1','platine i','plat1','plat i','platinum1','platinum i'] },
+  { id: 'gmr_Platine2',  label: 'Platine II',         emoji: '<:Platine2:643180361613967379>',       shortcuts: ['p2','platine2','platine ii','plat2','plat ii','platinum2','platinum ii'] },
+  { id: 'gmr_Platine3',  label: 'Platine III',        emoji: '<:Platine3:643180352910917662>',       shortcuts: ['p3','platine3','platine iii','plat3','plat iii','platinum3','platinum iii'] },
+  { id: 'gmr_Diamant1',  label: 'Diamant I',          emoji: '<:Diamant1:643180330412539915>',       shortcuts: ['d1','diamant1','diamant i','diamond1','diamond i'] },
+  { id: 'gmr_Diamant2',  label: 'Diamant II',         emoji: '<:Diamant2:1472041347786735697>',      shortcuts: ['d2','diamant2','diamant ii','diamond2','diamond ii'] },
+  { id: 'gmr_Diamant3',  label: 'Diamant III',        emoji: '<:Diamant3:1472041508072067216>',      shortcuts: ['d3','diamant3','diamant iii','diamond3','diamond iii'] },
+  { id: 'gmr_Champion1', label: 'Champion I',         emoji: '<:Champion1:643180293448007680>',      shortcuts: ['c1','champion1','champion i','champ1','champ i'] },
+  { id: 'gmr_Champion2', label: 'Champion II',        emoji: '<:Champion2:643180282857521163>',      shortcuts: ['c2','champion2','champion ii','champ2','champ ii'] },
+  { id: 'gmr_Champion3', label: 'Champion III',       emoji: '<:Champion3:643180274175180820>',      shortcuts: ['c3','champion3','champion iii','champ3','champ iii'] },
+  { id: 'gmr_GC1',       label: 'Grand Champion I',   emoji: '<:grandchampion1:1465401214199140434>',shortcuts: ['gc1','grand champion i','grandchampion1','gc 1'] },
+  { id: 'gmr_GC2',       label: 'Grand Champion II',  emoji: '<:GrandChampion2:758821306170343464>', shortcuts: ['gc2','grand champion ii','grandchampion2','gc 2'] },
+  { id: 'gmr_GC3',       label: 'Grand Champion III', emoji: '<:GrandChampion3:758821325321011260>', shortcuts: ['gc3','grand champion iii','grandchampion3','gc 3'] },
+  { id: 'gmr_SSL',       label: 'Supersonic Legend',  emoji: '<:SupersonicLegend:758821358993408020>',shortcuts: ['ssl','supersonic','supersonic legend'] },
 ];
+
+function findGmrRank(input) {
+  const s = input.trim().toLowerCase();
+  return GMR_RANKS.find(r =>
+    r.label.toLowerCase() === s ||
+    r.shortcuts.includes(s)
+  );
+}
 
 function buildGmrRankButtons() {
   const rows = [];
@@ -824,14 +832,22 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
+  // Vérification Owner/Fondateur pour les commandes admin
+  const ADMIN_COMMANDS = ['ban', 'unban', 'kick', 'mute', 'unmute', 'clear'];
+  if (interaction.isChatInputCommand() && ADMIN_COMMANDS.includes(interaction.commandName)) {
+    const allowedRoles = ['1522018910948425889', '1522019388264546314']; // Owner, Fondateur
+    const hasRole = allowedRoles.some(r => interaction.member.roles.cache.has(r));
+    if (!hasRole) return interaction.reply({ content: '❌ Réservé aux Owner et Fondateur.', ephemeral: true });
+  }
+
   // /guessmyrankvideo
   if (interaction.isChatInputCommand() && interaction.commandName === 'guessmyrankvideo') {
     const rankInput  = interaction.options.getString('rang');
     const attachment = interaction.options.getAttachment('video');
     const urlInput   = interaction.options.getString('url');
 
-    const rank = GMR_RANKS.find(r => r.label.toLowerCase() === rankInput.toLowerCase());
-    if (!rank) return interaction.reply({ content: `❌ Rang invalide. Exemples : \`Bronze I\`, \`Platine II\`, \`Champion III\``, ephemeral: true });
+    const rank = findGmrRank(rankInput);
+    if (!rank) return interaction.reply({ content: `❌ Rang invalide. Ex: \`b1\`, \`p2\`, \`gc3\`, \`ssl\`, \`Platine II\`...`, ephemeral: true });
 
     const mediaUrl = attachment?.url || urlInput;
     if (!mediaUrl) return interaction.reply({ content: '❌ Fournis une vidéo (fichier joint) ou une URL.', ephemeral: true });
@@ -932,13 +948,26 @@ client.on('interactionCreate', async (interaction) => {
   // ── GMR Modal soumise ──
   if (interaction.isModalSubmit() && interaction.customId === 'gmr_publish_modal') {
     const videoUrl = interaction.fields.getTextInputValue('gmr_video_url').trim();
-    const rankId   = interaction.fields.getTextInputValue('gmr_rank').trim();
-    const rank     = GMR_RANKS.find(r => r.label.toLowerCase() === rankId.toLowerCase() || r.id === rankId);
-    if (!rank) return interaction.reply({ content: '❌ Rang invalide. Ex: `Platine II`', ephemeral: true });
+    const rankInput = interaction.fields.getTextInputValue('gmr_rank').trim();
+    const rank = findGmrRank(rankInput);
+    if (!rank) return interaction.reply({ content: `❌ Rang invalide. Ex: \`b1\`, \`p2\`, \`gc3\`, \`ssl\``, ephemeral: true });
+
     const data = loadGmrData();
     data.videos.push({ url: videoUrl, rank: rank.label, emoji: rank.emoji, addedBy: interaction.user.id, addedAt: Date.now() });
     saveGmrData(data);
-    await interaction.reply({ content: `✅ Vidéo ajoutée avec le rang **${rank.emoji} ${rank.label}** !`, ephemeral: true });
+
+    // Poste dans le salon GMR
+    const gmrChannel = interaction.guild.channels.cache.get(GMR_CHANNEL_ID);
+    if (gmrChannel) {
+      const embed = new EmbedBuilder()
+        .setTitle('📤 Nouvelle vidéo ajoutée !')
+        .setDescription(`**${interaction.user.username}** a ajouté une vidéo.\nRang masqué — joue pour deviner !\n\n${videoUrl}`)
+        .setColor(0x5865f2)
+        .setFooter({ text: `Total : ${data.videos.length} vidéo(s)` });
+      await gmrChannel.send({ embeds: [embed] });
+    }
+
+    await interaction.reply({ content: `✅ Vidéo publiée avec le rang **${rank.emoji} ${rank.label}** !`, ephemeral: true });
     return;
   }
 
@@ -1017,12 +1046,26 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.customId === 'gmr_publish') {
-    // Stocke que cet user est en attente d'upload
-    gmrPendingPublish.set(interaction.user.id, { channelId: interaction.channelId, step: 'waiting_media' });
-    await interaction.reply({
-      content: '📤 **Envoie ta vidéo ou image directement dans ce salon** (en pièce jointe).\nLe bot va te demander le rang ensuite.',
-      ephemeral: true,
-    });
+    const modal = new ModalBuilder().setCustomId('gmr_publish_modal').setTitle('Publier une vidéo GMR');
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('gmr_video_url')
+          .setLabel('URL de la vidéo')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('https://youtube.com/... ou lien Discord')
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('gmr_rank')
+          .setLabel('Vrai rang (ex: Platine II, Champion I)')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Bronze I, Or III, Diamond II...')
+          .setRequired(true)
+      ),
+    );
+    await interaction.showModal(modal);
     return;
   }
 
