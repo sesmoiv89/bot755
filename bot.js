@@ -272,9 +272,10 @@ function findGmrRank(input) {
 
 function buildGmrRankButtons() {
   const rows = [];
-  for (let i = 0; i < GMR_RANKS.length; i += 4) {
+  for (let i = 0; i < GMR_RANKS.length; i += 5) {
+    if (rows.length >= 5) break;
     const row = new ActionRowBuilder();
-    GMR_RANKS.slice(i, i + 4).forEach(r => {
+    GMR_RANKS.slice(i, i + 5).forEach(r => {
       row.addComponents(
         new ButtonBuilder()
           .setCustomId(r.id)
@@ -287,7 +288,7 @@ function buildGmrRankButtons() {
     });
     rows.push(row);
   }
-  return rows;
+  return rows; // max 5 rangées = max 25 boutons
 }
 
 function buildGmrMainButtons() {
