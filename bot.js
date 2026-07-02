@@ -2,7 +2,10 @@
 if (!process.env.DISCORD_TOKEN) {
   try { require('dotenv').config(); } catch {}
 }
-const { startPanel } = require('./panel/server');
+
+// Panel web (optionnel - seulement en local)
+let startPanel = () => {};
+try { ({ startPanel } = require('./panel/server')); } catch {}
 const {
   Client,
   GatewayIntentBits,
